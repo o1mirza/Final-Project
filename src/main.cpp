@@ -73,7 +73,6 @@ class static_object_handler{
 static_object_handler static_object_renderer {};
 
 // Projectile Class
-class 
 
 // Dotted line handler
 
