@@ -1,5 +1,5 @@
 # Final-Project
-
+```
 Setup
 0. Instll git and CMake
 1. sudo apt update
@@ -18,3 +18,4 @@ Setup
 4. cmake -B build
 5. cmake --build build
 6. ./build/bin/main
+```
