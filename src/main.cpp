@@ -11,6 +11,7 @@
 #include <string>
 #include <map>
 #include <variant>
+#include <algorithm>
 
 // GLOBAL VALUES
 // Constant config values
@@ -20,7 +21,7 @@ bool STOP_TIME {false};
 
 // Main rendering surface 
 sf::RenderWindow *window = nullptr;
-// Camera object - prespective of the user
+// Camera object - perspective of the user
 sf::View camera(sf::FloatRect({0, 0}, {WIDTH, HEIGHT}));
 
 // 2D Vector
@@ -44,50 +45,92 @@ struct ParameterInfo{
 using UserParamaters = std::variant<Vector2, float>;
 std::map<ParameterInfo, UserParamaters> projectile_parameters {};
 
-// Static object handler - rendering
-class static_object_handler{
-    private:
-        std::vector<std::shared_ptr<sf::Drawable>> object_list;
+// Static object handler
+class static_object_manager{
+    protected:
+        using shape_ptr = std::shared_ptr<sf::Shape>;
+        std::vector<shape_ptr> object_list;
 
     public:
-        static_object_handler(){}
+        static_object_manager(){}
 
-        void add_object(sf::RectangleShape square, const sf::Color &color, Vector2 pos){
+        shape_ptr add_object(sf::RectangleShape square, const sf::Color &color, const Vector2 &pos){
             square.setFillColor(color);
             square.setPosition({pos.x, pos.y});
-            object_list.push_back(std::make_shared<sf::RectangleShape> (square));
+            shape_ptr shape = std::make_shared<sf::RectangleShape>(square);
+            object_list.push_back(shape);
+            return shape;
         }
 
-        void add_object(sf::CircleShape circle, const sf::Color &color, Vector2 pos){
+        shape_ptr add_object(sf::CircleShape circle, const sf::Color &color, const Vector2 &pos){
             circle.setFillColor(color);
             circle.setPosition({pos.x, pos.y});
-            object_list.push_back(std::make_shared<sf::CircleShape> (circle));
+            shape_ptr shape = std::make_shared<sf::CircleShape>(circle);
+            object_list.push_back(shape);
+            return shape;
         }
 
         void draw(){
             for (const auto &object_ptr : object_list)
                 window->draw(*object_ptr);
         }
+
+        void delete_object(shape_ptr &shape){
+            // Reset the pointer
+            shape.reset();
+            // Remove the pointer from the list
+            auto new_vct_end = std::remove(object_list.begin(), object_list.end(), shape);
+            object_list.erase(new_vct_end, object_list.end());
+        }
 };
-// Initialize the object renderer
-static_object_handler static_object_renderer {};
+// Initialize the static object renderer
+static_object_manager static_object_renderer {};
+
+// Dynamic object handler
+class dynamic_object_manager: public static_object_manager{
+    public:
+        dynamic_object_manager(){}
+
+        void move(const std::unique_ptr<sf::Shape> obj, const Vector2 &d_pos){
+            obj->move({d_pos.x, d_pos.y});
+        }
+
+};
+// Initialize the dynamic object handler
+dynamic_object_manager dynamic_object_handler {};
 
 // Projectile Class
+// Config
+class projectile_manager {
+    private:
+        std::unique_ptr<dynamic_object_manager> object_ptr;
+    
+    public:
+        projectile_manager(){
+            auto object_ptr = dynamic_object_handler.add_object(sf::CircleShape{30.f}, sf::Color::Red, Vector2(10,10));
+        }
+
+        void move(const Vector2 &pos){
+
+        }
+
+};
 
 // Dotted line handler
+class dotted_line_manager {};
 
 // Handles all of the keyboard interactions
 void process_keyboard(){
     if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_W)))
         camera.move({0.f, CAMERA_SPEED});
 
-    if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_A)))
+    else if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_A)))
         camera.move({CAMERA_SPEED, 0.f});    
 
-    if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_S)))
+    else if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_S)))
         camera.move({0.f, -CAMERA_SPEED});
 
-    if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_D)))
+    else if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_D)))
         camera.move({-CAMERA_SPEED, 0.f});
 
     // P to pause, arrows to move in time
@@ -124,6 +167,7 @@ void window_processing(){
 
     // Draw all objects
     static_object_renderer.draw();
+    dynamic_object_handler.draw();
 
     // Push the updates to both imGUI and SFML
     ImGui::SFML::Render(*window);
@@ -136,19 +180,27 @@ int main(){
     window = &window_obj;
     window->setFramerateLimit(FPS_LOCK);
 
-    // Check if the GUI mounted
+    // Center the screen to the display
+    auto desktop = sf::VideoMode::getDesktopMode();
+    window_obj.setPosition({
+        (static_cast<int>(desktop.size.x) / 2) - (static_cast<int>(window_obj.getSize().x) / 2),
+        (static_cast<int>(desktop.size.y) / 2) - (static_cast<int>(window_obj.getSize().y) / 2)
+    });
+
+    // Check if the GUI is mounted
     if (!ImGui::SFML::Init(*window))
         return -1;
 
     // Add objects to the frame
-    static_object_renderer.add_object(sf::RectangleShape{sf::Vector2f(200.f, 200.f)}, sf::Color::Green, Vector2(10,10));
+    //static_object_renderer.add_object(sf::RectangleShape({200.f, 200.f}), sf::Color::Green, Vector2(10,10));
+    dynamic_object_handler.add_object(sf::CircleShape{30.f}, sf::Color::Red, Vector2(10,10));
 
-    // While the windo is open, run the mian processing loop
+    // While the window is open, run the main processing loop
     while (window->isOpen()){
         window_processing();
     }
 
-    // Shutdown the ImGUI safly and end execution 
+    // Shutdown the ImGUI safely and end execution 
     ImGui::SFML::Shutdown();
     return 0;
 }
