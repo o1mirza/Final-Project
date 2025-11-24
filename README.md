@@ -1,6 +1,7 @@
 # Final-Project
+
+**Setup:**
 ```
-Setup
 0. Install git and CMake (sudo apt install)
 1. sudo apt update
 2. sudo apt install \
