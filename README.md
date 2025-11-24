@@ -1,7 +1,7 @@
 # Final-Project
 ```
 Setup
-0. Instll git and CMake
+0. Install git and CMake (sudo apt install)
 1. sudo apt update
 2. sudo apt install \
     libxrandr-dev \
@@ -17,5 +17,5 @@ Setup
 3. cd Final-Project
 4. cmake -B build
 5. cmake --build build
-6. ./build/bin/main
+6. Finally, you can use ./build/bin/main to run the code
 ```
