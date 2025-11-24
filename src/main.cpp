@@ -1,11 +1,10 @@
 // Imports
-#include <iostream>
 #include <SFML/Graphics.hpp>
 #include <SFML/Window/Keyboard.hpp>
 #include <imgui.h>
 #include <imgui-SFML.h>
 #include <vector>
-#include <optional>
+#include <optional>//
 #include <cmath>
 #include <memory>
 #include <string>
@@ -15,8 +14,11 @@
 // GLOBAL VALUES
 // Constant config values
 const unsigned int FPS_LOCK {60}, WIDTH {1280}, HEIGHT {720};
-const float CAMERA_SPEED {2};
-bool STOP_TIME {false};
+const double CAMERA_SPEED {2};
+
+// GLOBAL VARIABLES
+bool stop_time {false};
+std::string user_error_message {};
 
 // Main rendering surface 
 sf::RenderWindow *window = nullptr;
@@ -25,43 +27,352 @@ sf::View camera(sf::FloatRect({0, 0}, {WIDTH, HEIGHT}));
 
 // 2D Vector
 struct Vector2 {
-    float x, y;
+    double x, y;
 
     Vector2(): x(0.f), y(0.f) {}
-    Vector2(float i, float j): x(i), y(j) {}
-    Vector2(int i, int j): x(static_cast<float>(i)), y(static_cast<float>(j)) {}
-    Vector2(float magnitude, float x_angle, bool sad = true){
+    Vector2(double i, double j): x(i), y(j) {}
+    Vector2(int i, int j): x(static_cast<double>(i)), y(static_cast<double>(j)) {}
+    Vector2(double magnitude, double x_angle, bool sad = true){
         x = magnitude * std::cos(x_angle);
         y = magnitude * std::sin(x_angle);
     }
 };
+
+// Enums to store parameter name and table
+enum class Parameter{V_INITIAL_I_COMPONENT, V_INITIAL_J_COMPONENT, V_FINAL_I_COMPONENT, V_FINAL_J_COMPONENT, Y_INITIAL, ACC, ANGLE, TIME, RANGE, ABS_MAX_HEIGHT, MAX_HEIGHT, TIME_OF_APEX, INITIAL_SPEED, FINAL_SPEED, COEFF_FRICTION, FORCE, MASS};
+enum class ParameterTable {KINEMATICS_SCALAR, KINEMATICS_VECTOR, FORCES, BOTH}; // Both is kinematic and scalar 
+
+// Holds the value and corresponding metadata about the parameter
 struct ParameterInfo{
-    float value {};
+    std::string name {};
+
+    double value {};
+    const double default_value {};
     const int min {}, max {};
-    bool is_required {};
-};
-// User input and metadata
-std::map<std::string, ParameterInfo> projectile_parameters {
-    {"Initial Velocity", ParameterInfo{0.f, 0, 1000, true}},
-    {"Final Velocity", ParameterInfo{0.f, 0, 1000, true}},
-    {"Initial Speed", ParameterInfo{0.f, 0, 1000, true}},
-    {"Final Speed", ParameterInfo{0.f, 0, 1000, true}},
-    {"Initial Height", ParameterInfo{0.f, 0, 1000, true}},
-    {"coeff Friction", ParameterInfo{0.f, 0, 1, true}},
-    {"X Acceleration", ParameterInfo{0.f, 0, 1000, true}},
-    {"Y Acceleration", ParameterInfo{0.f, 0, 1000, true}},
-    {"Initial Force", ParameterInfo{0.f, 0, 1000, true}},
-    {"Final Force", ParameterInfo{0.f, 0, 1000, true}},
-    {"WRT x Angle", ParameterInfo{0.f, 0, 360, true}},
-    {"Time Elapsed", ParameterInfo{0.f, 0, 1000, true}},
-    {"Mass", ParameterInfo{0.f, 0, 1000, true}},
-    {"Distance", ParameterInfo{0.f, 0, 1000, true}},
+    
+    const bool is_required {};
+    ParameterTable info_type {};
+    std::vector<Parameter> dependencies {};
 };
 
-// Validate input
+// Map to store user input and values to be displayed to the user
+std::map<Parameter, ParameterInfo> projectile_parameters {
+    {Parameter::V_INITIAL_I_COMPONENT, ParameterInfo{"v_initial_i_component", 0.f, 0.f, 1, 1000, true, ParameterTable::KINEMATICS_VECTOR, {Parameter::V_INITIAL_J_COMPONENT}}},
+    {Parameter::V_INITIAL_J_COMPONENT, ParameterInfo{"v_ininitial_j_component", 0.f, 0.f, 1, 1000, true, ParameterTable::KINEMATICS_VECTOR, {Parameter::V_INITIAL_I_COMPONENT}}},
+    {Parameter::V_FINAL_I_COMPONENT, ParameterInfo{"v_final_i_component", 0.f, 0.f, 1, 1000, true, ParameterTable::KINEMATICS_VECTOR, {Parameter::V_FINAL_J_COMPONENT}}},
+    {Parameter::V_FINAL_J_COMPONENT, ParameterInfo{"v_final_j_component", 0.f, 0.f, 1, 1000, true, ParameterTable::KINEMATICS_VECTOR, {Parameter::V_FINAL_I_COMPONENT}}},
+    {Parameter::INITIAL_SPEED, ParameterInfo{"initial_speed", 0.f, 0.f, 1, 1000, true, ParameterTable::KINEMATICS_SCALAR, {}}},
+    {Parameter::FINAL_SPEED, ParameterInfo{"final_speed", 0.f, 0.f, 1, 1000, true, ParameterTable::KINEMATICS_SCALAR, {}}},
+    {Parameter::Y_INITIAL, ParameterInfo{"y_initial", 0.f, 0.f, 0, 1000, false, ParameterTable::BOTH, {}}},
+    {Parameter::COEFF_FRICTION, ParameterInfo{"coeff_friction", 0.f, 0.f, 1, 1, true, ParameterTable::FORCES, {Parameter::FORCE, Parameter::TIME, Parameter::MASS}}},
+    {Parameter::ACC, ParameterInfo{"acc", 0.f, 0.f, -1000, -1, true, ParameterTable::BOTH, {}}},
+    {Parameter::FORCE, ParameterInfo{"force", 0.f, 0.f, 1, 1000, true, ParameterTable::FORCES, {Parameter::TIME, Parameter::MASS}}},
+    {Parameter::ANGLE, ParameterInfo{"angle", 45.f, 45.f, 0, 90, false, ParameterTable::BOTH, {}}},
+    {Parameter::TIME, ParameterInfo{"time", 0.f, 0.f, 1, 1000, true, ParameterTable::BOTH, {}}},
+    {Parameter::MASS, ParameterInfo{"mass", 0.f, 0.f, 1, 1000, true, ParameterTable::FORCES, {Parameter::FORCE, Parameter::TIME}}},
+    {Parameter::RANGE, ParameterInfo{"range", 0.f, 0.f, 1, 1000, true, ParameterTable::BOTH, {}}},
+    {Parameter::MAX_HEIGHT, ParameterInfo{"max_height", 0.f, 0.f, 1, 1000, true, ParameterTable::BOTH, {}}},
+    {Parameter::ABS_MAX_HEIGHT, ParameterInfo{"abs_max_height", 0.f, 0.f, 1, 1000, false, ParameterTable::BOTH, {}}},
+    {Parameter::TIME_OF_APEX, ParameterInfo{"apexTime", 0.f, 0.f, 1, 1000, false, ParameterTable::BOTH, {}}}
+};
+
+// Sets all the values in the map to their default values - runs when clear button is pressed or when the user switches tabs in the GUI
+void clear_userInput() {
+    for (auto &[_, info] : projectile_parameters){
+        info.value = info.default_value;
+    }
+
+    user_error_message = ""; // Clear error message string
+}
+
+// Physics Engine
+void find_unknown(double &y_initial, double &v_initial, double &v_final, double &acc, double &time, double &max_height, double &abs_max_height, double &range, const double &angle, double &v_initial_i_component, double &v_initial_j_component, double &v_final_i_component, double &v_final_j_component, double &apexTime) {    
+    // y_initial  --> initial height of the projectile with respect to the ground
+    // v_initial  --> initial speed (non-vector) of projectile
+    // v_final    --> final speed (non-vector) of projectile
+    // acc        --> acceleration magnitude (non-vector) of projectile (vertical axis only)
+    // time       --> full period of motion of projectile
+    // max_height     --> Height / Vertical displacement of projectile
+    // range      --> Horizontal Distance Travalled by the Projectile
+    // angle      --> angle (degrees) with respect to the x-axis
+    // v_initial_i_component  --> initial horiztonal velocity vector component (always greater than 0)
+    // v_initial_j_component  --> initial vertical velocity vector component (either 0 or positive)
+    // v_final_i_component    --> final horizontal velocity vector component (always greater than 0)
+    // v_final_j_component    --> final vertical velocity component (either 0 or negative)
+
+    double theta {}; // Launch Angle: Used for symmetrical case (y_initil = 0)
+    //double theta1 {}; // Launch Angle: Used for asymmetrical case -- initial angle (y_initial > 0)
+    //double theta2 {}; // Impact Angle: Used for asymmetrical case -- final angle (y_initial > 0)
+
+    // The code below is responsible for checking and calculating two unknown parameters of the projectile
+    // by using the 3 known parameters. The three known parameters may be used to calculate both of the 
+    // remaining parameters, or solving for one can be further used to solve for the other.
+
+    if(y_initial == 0.0) { // instructions executed if projectile begins on the ground
+
+        // Normalizing vector inputs below
+
+        if(v_initial_i_component != 0) { // only checking for initial i-component
+            v_initial = sqrt(pow(v_initial_i_component, 2) + pow(v_initial_j_component, 2));
+
+            theta = std :: atan(abs(v_initial_j_component / v_initial_i_component));
+        }
+
+        else {theta = angle * (M_PI / 180.0);}
+
+        if(v_final_i_component != 0) { // only checking for final i-component
+            v_final = sqrt(pow(v_final_i_component, 2) + pow(v_final_j_component, 2));
+
+            theta = std::atan(abs(v_final_j_component / v_final_i_component));
+        }
+
+        else {theta = angle * (M_PI / 180.0);}
+
+        // 1. time & max_height & range (checked)
+        if(time == 0 && max_height == 0 && range == 0) {
+            time = (((0 - v_initial) * std::sin(theta)) / acc) * 2;
+            max_height = (v_initial * std::sin(theta) * (time / 2)) + (0.5 * acc * pow(time / 2, 2));
+            range = v_initial * std::cos(theta) * time;
+        }
+
+        // 2. time & acc & range (checked)
+        else if(time == 0 && acc == 0 && range == 0) {
+            acc = (0 - pow((v_initial * std::sin(theta)), 2)) / (2 * max_height);
+            time = (((0 - v_initial) * std::sin(theta)) / acc) * 2;
+            range = v_initial * std::cos(theta) * time;
+        }
+
+        // 3. acc & v_initial & range (checked)
+        else if(acc == 0 && v_initial == 0 && range == 0) {
+            v_initial = v_final;
+            acc = ((0 - v_initial) * std::sin(theta)) / (time / 2);
+            range = v_initial * std::cos(theta) * time;
+        }
+
+        // 4. v_final & acc & range (checked)
+        else if(v_final == 0 && acc == 0 && range == 0) {
+            v_final = v_initial;
+            acc = ((0 - v_initial) * std::sin(theta)) / (time / 2);
+            range = v_initial * std::cos(theta) * time;
+        }
+
+        // 5. v_final & time & range (checked)
+        else if(v_final == 0 && time == 0 && range == 0) {
+            v_final = v_initial;
+            time = ((0 - v_initial) * std::sin(theta)) / (acc / 2);
+            range = v_initial * std::cos(theta) * time;
+        }
+
+        // 6. v_inital & time & range (checked)
+        else if(v_initial == 0 && time == 0 && range == 0) {
+            v_initial = v_final;
+            time = (((0 - v_initial) * std::sin(theta)) / acc) * 2;
+            range = v_initial * std::cos(theta) * time;
+        }
+
+        // 7. max_height & acc & range (checked)
+        else if(max_height == 0 && acc == 0 && range == 0) {
+            acc = ((0 - v_initial) * std::sin(theta)) / (time / 2);
+            max_height = -pow((5 * std::sin(theta)), 2) / acc;
+            range = v_initial * std::cos(theta) * time;
+        }
+
+        // 8. v_initial & range & max_height (checked)
+        else if(v_initial == 0 && range == 0 && max_height == 0) {
+            v_initial = v_final;
+            time = range / (v_initial * std::cos(theta));
+            max_height = (v_initial * std::sin(theta) * (time / 2)) + (0.5 * acc * pow((time / 2), 2));
+        }
+
+        // 9. range & v_final & max_height (checked)
+        else if(range == 0 && v_final == 0 && max_height == 0) {
+            v_final  = v_initial;
+            range = v_initial * std::cos(theta) * time;
+            max_height = (v_initial * std::sin(theta) * (time / 2)) + (0.5 * acc * pow((time / 2), 2));
+        }
+
+        // 10. v_final & v_initial & range ()
+        else if(v_final == 0 && v_initial == 0 && range == 0) {
+            v_initial = (max_height - 0.5 * acc * pow(time / 2, 2)) / ((time / 2) * std::sin(theta));
+            v_final = v_initial;
+            range = v_initial * std::cos(theta) * time;
+        }
+
+        // 11. max_height & time & v_initial (checked)
+        else if(max_height == 0 && time == 0 && v_initial == 0) {
+            v_initial = v_final;
+            time = (((0 - v_initial) * std::sin(theta)) / acc) * 2;
+            max_height = (v_initial * std::sin(theta) * time) + (0.5 * acc * pow(time, 2));
+        }
+
+        // 12. max_height & time & v_final (checked)
+        else if(max_height == 0 && time == 0 && v_final == 0) {
+            v_final = v_initial;
+            time = (((0 - v_initial) * std::sin(theta) * 2) / acc) * 2;
+            max_height = (v_initial * std::sin(theta) * time) + (0.5 * acc * pow(time, 2));
+        }
+
+        // 13. max_height & time & acc (checked)
+        else if(max_height == 0 && time == 0 && acc == 0) {
+            time = range / (v_initial * std::cos(theta));
+            acc = ((0 - v_initial) * std::sin(theta)) / (time / 2);
+            max_height = (v_initial * std::sin(theta) * time) + (0.5 * acc * pow(time, 2));
+        }
+
+        // 14. max_height & v_initial & v_final (checked)
+        else if(max_height == 0 && v_initial == 0 && v_final == 0) {
+            v_initial = range / (time * std::cos(theta));
+            v_final = v_initial;
+            max_height = (v_initial * std::sin(theta) * time) + (0.5 * acc * pow(time, 2));
+        }
+
+        // 15. max_height & v_initial & acc (checked)
+        else if(max_height == 0 && v_initial == 0 && acc == 0) {
+            v_initial = v_final;
+            acc = ((0 - v_initial) * std::sin(theta)) / (time / 2);
+            max_height = (v_initial * std::sin(theta) * time) + (0.5 * acc * pow(time, 2));
+        }
+
+        // 16. max_height & v_final & acc (checked)
+        else if(max_height == 0 && v_final == 0 && acc == 0) {
+            v_final = v_initial;
+            acc = ((0 - v_initial) * std::sin(theta)) / (time / 2);
+            max_height = (v_initial * std::sin(theta) * time) + (0.5 * acc * pow(time, 2));
+        }
+
+        // 17. time & v_initial & v_final (checked)
+        else if(time == 0 && v_initial == 0 && v_final == 0) {
+            time = 0;
+            v_initial = 0;
+            v_final = 0;
+        }
+
+        // 18. time & v_initial & acc (checked)
+        else if(time == 0 && v_initial == 0 && acc == 0) {
+            v_initial = v_final;
+            time = range / (v_initial * std::cos(theta));
+            acc = ((0 - v_initial) * std::sin(theta)) / (time / 2);
+        }
+
+        // 19. time & v_final & acc (checked)
+        else if(time == 0 && v_final == 0 && acc == 0) {
+            v_final = v_initial;
+            time = range / (v_initial * std::cos(theta));
+            acc = ((0 - v_initial) * std::sin(theta)) / (time / 2);
+        }
+
+        // 20. v_inital & v_final & acc (checked)
+        else if(v_initial == 0 && v_final == 0 && acc == 0) {
+            v_initial = range / (time * std::cos(theta));
+            v_final = v_initial;
+            acc = ((0 - v_initial) * std::sin(theta)) / (time / 2);
+        }
+    }
+
+    abs_max_height = y_initial + max_height; // Calculate maximum height (absolute) with respect to ground
+    apexTime = (-1 * v_initial * std::sin(theta)) / acc / 2; // Calculate or recalculate time the projectile needs to reach maximum height with respect to launch
+}
+
+// Verifies all input fields
+void cleanup_input(){
+    unsigned int required_scalar_count {}, required_vector_count {};
+    std::vector<int> given {};
+
+    // Verify all values are inside their ranges
+    for (const auto &[name, info] : projectile_parameters){
+        if (info.value == 0.0) // Ignore default values
+            continue;
+
+        if (info.value < info.min || info.value > info.max){
+            user_error_message = "Parameter: " + info.name +
+                     " with value: " + std::to_string(info.value) +
+                     " is not within allowed range [" + std::to_string(info.min) + ", " +
+                     std::to_string(info.max) + "]\nPlease enter valid and consistent values!";
+            return;
+        }
+
+        // Cache to check for dependencies later
+        given.push_back(static_cast<int>(name));
+    }
+
+    // Check that all of the given variables have the required dependencies
+    for (int &index : given){
+        const ParameterInfo &info = projectile_parameters[static_cast<Parameter>(index)];
+        for (const Parameter &dep : info.dependencies) {
+            if (std::find(given.begin(), given.end(), static_cast<int>(dep)) == given.end()) {
+                user_error_message = "Missing required dependency for parameter: " + 
+                          info.name + ": dependency " +
+                          projectile_parameters[dep].name + " not provided";
+                return;
+            }
+        }
+
+        if (info.is_required) {
+            if (info.info_type == ParameterTable::KINEMATICS_SCALAR || info.info_type == ParameterTable::BOTH)
+                ++required_scalar_count;
+
+            if (info.info_type == ParameterTable::KINEMATICS_VECTOR || info.info_type == ParameterTable::BOTH)
+                ++required_vector_count;
+        }
+    }
+
+    // Check if the threshold is reached and call the physics engine
+    if (required_scalar_count >= 3 || required_vector_count >= 3){
+        // Verify initial and final velocities are the same if both are given
+        if(projectile_parameters[Parameter::INITIAL_SPEED].value != 0.f && projectile_parameters[Parameter::FINAL_SPEED].value != 0.f) {
+            if (projectile_parameters[Parameter::INITIAL_SPEED].value != projectile_parameters[Parameter::FINAL_SPEED].value){
+                user_error_message = "Initial and Final speed are NOT the same!";
+                return;
+            }
+        }
+
+        if(projectile_parameters[Parameter::V_INITIAL_I_COMPONENT].value != 0.f && projectile_parameters[Parameter::V_FINAL_I_COMPONENT].value != 0.f) {
+            if(projectile_parameters[Parameter::V_INITIAL_I_COMPONENT].value != projectile_parameters[Parameter::V_FINAL_I_COMPONENT].value) {
+                user_error_message = "Initial and Final vertical (i) components are NOT the same!";
+                return;
+            }
+        }
+
+        if(projectile_parameters[Parameter::V_INITIAL_J_COMPONENT].value != 0.f && projectile_parameters[Parameter::V_FINAL_J_COMPONENT].value != 0.f) {
+            if(projectile_parameters[Parameter::V_INITIAL_J_COMPONENT].value != projectile_parameters[Parameter::V_FINAL_J_COMPONENT].value) {
+                user_error_message = "Initial and Final Horizontal (j) components are NOT the same!";
+                return;
+            }
+        }
+
+        // Inputs look valid, call the physics engine
+        find_unknown(
+            projectile_parameters[Parameter::Y_INITIAL].value,
+            projectile_parameters[Parameter::INITIAL_SPEED].value,
+            projectile_parameters[Parameter::FINAL_SPEED].value,
+            projectile_parameters[Parameter::ACC].value,
+            projectile_parameters[Parameter::TIME].value,
+            projectile_parameters[Parameter::MAX_HEIGHT].value,
+            projectile_parameters[Parameter::ABS_MAX_HEIGHT].value,
+            projectile_parameters[Parameter::RANGE].value,
+            projectile_parameters[Parameter::ANGLE].value,
+            projectile_parameters[Parameter::V_INITIAL_I_COMPONENT].value,
+            projectile_parameters[Parameter::V_INITIAL_J_COMPONENT].value,
+            projectile_parameters[Parameter::V_FINAL_I_COMPONENT].value,
+            projectile_parameters[Parameter::V_FINAL_J_COMPONENT].value,
+            projectile_parameters[Parameter::TIME_OF_APEX].value
+        );
+
+        // Check output value -> <0 means the input values lead to an impossible case
+        if(projectile_parameters[Parameter::MAX_HEIGHT].value  < 0) {
+            user_error_message = "User has entered inconsistent values!\nLook at the calculated value of Maximum Height!";
+            return;
+        }
+    } 
+    
+    else {
+        user_error_message = "Not enough required inputs. Required scalar count = " + std::to_string(required_scalar_count) +
+                  ", required vector count = " + std::to_string(required_vector_count);
+    }
+}
 
 // Static object handler
-using shape_ptr = std::shared_ptr<sf::Shape>;
+using shape_ptr = std::shared_ptr<sf::Shape>; // Bit cleaner to use shape_ptr instead of having to type all of that
 class static_object_manager{
     protected:
         std::vector<shape_ptr> object_list;
@@ -163,15 +474,15 @@ void process_keyboard(){
     else if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_D)))
         camera.move({-CAMERA_SPEED, 0.f});
     
-    else if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_P)))
-        for (const auto& pair : projectile_parameters) {
-            const std::string& key = pair.first;
-            const ParameterInfo value = pair.second;
-            std::cout <<  key << " : " << value.value << std::endl;
+    else if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_P))) {
+
     }
 }
 
 void render_gui(){
+    // Holds which tab is currently selected, used for clearing values on switch
+    static ParameterTable table_state {};
+
     // --- Input Tab ---
     // Set initial position of the window
     ImGui::SetNextWindowPos(ImVec2(10.f,10.f), ImGuiCond_Once);
@@ -179,42 +490,115 @@ void render_gui(){
 
     // --- Layout Settings ---
     ImGui::PushItemWidth(120.0f);
-    // --- Input Fields ---
-    ImGui::Text("Initial Velocity (m/s):");    ImGui::SameLine(200); ImGui::InputFloat("##initVel", &projectile_parameters["Initial Velocity"].value, 0.f, 0.f, "%.2f");
-    ImGui::Text("Final Velocity (m/s):");      ImGui::SameLine(200); ImGui::InputFloat("##finalVel", &projectile_parameters["Final Velocity"].value, 0.0f, 0.0f, "%.2f");
-    ImGui::Text("Initial Speed (m/s):");       ImGui::SameLine(200); ImGui::InputFloat("##initSpeed", &projectile_parameters["Initial Speed"].value, 0.0f, 0.0f, "%.2f");
-    ImGui::Text("Final Speed (m/s):");         ImGui::SameLine(200); ImGui::InputFloat("##finalSpeed", &projectile_parameters["Final Speed"].value, 0.0f, 0.0f, "%.2f");
-    ImGui::Text("Initial Height (m):");        ImGui::SameLine(200); ImGui::InputFloat("##initHeight", &projectile_parameters["Initial Height"].value, 0.0f, 0.0f, "%.2f");
-    ImGui::Text("Friction (μ):");              ImGui::SameLine(200); ImGui::InputFloat("##friction", &projectile_parameters["coeff Friction"].value, 0.0f, 0.0f, "%.3f");
-    ImGui::Text("X-Acceleration (m/s²):");     ImGui::SameLine(200); ImGui::InputFloat("##xAccel", &projectile_parameters["X Acceleration"].value, 0.0f, 0.0f, "%.2f");
-    ImGui::Text("Y-Acceleration (m/s²):");     ImGui::SameLine(200); ImGui::InputFloat("##yAccel", &projectile_parameters["Y Acceleration"].value, 0.0f, 0.0f, "%.2f");
-    ImGui::Text("Initial Force (N):");         ImGui::SameLine(200); ImGui::InputFloat("##initForce", &projectile_parameters["Initial Force"].value, 0.0f, 0.0f, "%.2f");
-    ImGui::Text("Final Force (N):");           ImGui::SameLine(200); ImGui::InputFloat("##finalForce", &projectile_parameters["Final Force"].value, 0.0f, 0.0f, "%.2f");
-    ImGui::Text("Launch Angle (°):");          ImGui::SameLine(200); ImGui::InputFloat("##angle", &projectile_parameters["WRT x Angle"].value, 0.0f, 0.0f, "%.2f");
-    ImGui::Text("Time (s):");                  ImGui::SameLine(200); ImGui::InputFloat("##time", &projectile_parameters["Time Elapsed"].value, 0.0f, 0.0f, "%.2f");
-    ImGui::Text("Mass (kg):");                 ImGui::SameLine(200); ImGui::InputFloat("##mass", &projectile_parameters["Mass"].value, 0.0f, 0.0f, "%.2f");
-    ImGui::Text("Distance (m):");              ImGui::SameLine(200); ImGui::InputFloat("##distance", &projectile_parameters["Distance"].value, 0.0f, 0.0f, "%.2f");
 
-    // --- Results Variables ---
-    static float maxHeight  = 0.0f;
-    static float totalRange = 0.0f;
-    static float flightTime = 0.0f;
-    // --- Layout Settings ---
-    ImGui::PushItemWidth(120.0f);
-    // --- Results Section (read-only input boxes) ---
-    ImGui::BeginDisabled();  // prevents user editing but still shows the inputs normally
-    // --- Output Fields ---
-    ImGui::Text("Maximum Height (m):"); ImGui::SameLine(200);
-    ImGui::InputFloat("##maxHeight", &maxHeight, 0.0f, 0.0f, "%.2f");
-    ImGui::Text("Total Range (m):");    ImGui::SameLine(200);
-    ImGui::InputFloat("##range", &totalRange, 0.0f, 0.0f, "%.2f");
-    ImGui::Text("Time of Flight (s):"); ImGui::SameLine(200);
-    ImGui::InputFloat("##timeFlight", &flightTime, 0.0f, 0.0f, "%.2f");
-    //--- End of Results Section ---
-    ImGui::EndDisabled();
-    ImGui::PopItemWidth();
+    // Create tab bar
+    if (ImGui::BeginTabBar("InputTabs"))
+    {
+        // Kinematics Tab
+        if (ImGui::BeginTabItem("Kinematics")) {
+
+            // Kinematics Sub Tabs
+            if (ImGui::BeginTabBar("KinematicsSubTabs")) {
+                if (ImGui::BeginTabItem("Scalar Values")) {
+                     // --- Input Fields ---
+                    if(table_state != ParameterTable::KINEMATICS_SCALAR) {
+                        clear_userInput();
+                        table_state = ParameterTable::KINEMATICS_SCALAR;
+                    }
+
+                    ImGui::Text("Initial Speed (m/s):");       ImGui::SameLine(200); ImGui::InputDouble("##initSpeed", &projectile_parameters[Parameter::INITIAL_SPEED].value, 0.0f, 0.0f, "%.2f");
+                    ImGui::Text("Final Speed (m/s):");         ImGui::SameLine(200); ImGui::InputDouble("##finalSpeed", &projectile_parameters[Parameter::FINAL_SPEED].value, 0.0f, 0.0f, "%.2f");
+                    ImGui::Text("Initial Height (m):");        ImGui::SameLine(200); ImGui::InputDouble("##initHeight", &projectile_parameters[Parameter::Y_INITIAL].value, 0.0f, 0.0f, "%.2f");
+                    ImGui::Text("Y-Acceleration (m/s²):");     ImGui::SameLine(200); ImGui::InputDouble("##yAccel", &projectile_parameters[Parameter::ACC].value, 0.0f, 0.0f, "%.2f");
+                    ImGui::Text("Launch Angle (°):");          ImGui::SameLine(200); ImGui::InputDouble("##angle", &projectile_parameters[Parameter::ANGLE].value, 0.0f, 0.0f, "%.2f");
+                    ImGui::Text("Time (s):");                  ImGui::SameLine(200); ImGui::InputDouble("##time", &projectile_parameters[Parameter::TIME].value, 0.0f, 0.0f, "%.2f");
+                    ImGui::Text("Distance (m):");              ImGui::SameLine(200); ImGui::InputDouble("##distance", &projectile_parameters[Parameter::RANGE].value, 0.0f, 0.0f, "%.2f");
+                    ImGui::Text("Maximum Height (m):");        ImGui::SameLine(200); ImGui::InputDouble("##maxHeight", &projectile_parameters[Parameter::MAX_HEIGHT].value, 0.0f, 0.0f, "%.2f");
+
+                    ImGui::EndTabItem();
+                }
+
+                if (ImGui::BeginTabItem("Vector Values")) {
+                    // --- Input Fields ---
+                    if(table_state != ParameterTable::KINEMATICS_VECTOR) {
+                        clear_userInput();
+                        table_state = ParameterTable::KINEMATICS_VECTOR;
+                    }
+
+                    ImGui::Text("Initial i Velocity (m/s):");    ImGui::SameLine(200); ImGui::InputDouble("##initVel_i", &projectile_parameters[Parameter::V_INITIAL_I_COMPONENT].value, 0.f, 0.f, "%.2f");
+                    ImGui::Text("Initial j Velocity (m/s):");    ImGui::SameLine(200); ImGui::InputDouble("##initVel_j", &projectile_parameters[Parameter::V_INITIAL_J_COMPONENT].value, 0.f, 0.f, "%.2f");
+                    ImGui::Text("Final i Velocity (m/s):");      ImGui::SameLine(200); ImGui::InputDouble("##finalVel_i", &projectile_parameters[Parameter::V_FINAL_I_COMPONENT].value, 0.0f, 0.0f, "%.2f");
+                    ImGui::Text("Final j Velocity (m/s):");      ImGui::SameLine(200); ImGui::InputDouble("##finalVel_j", &projectile_parameters[Parameter::V_FINAL_J_COMPONENT].value, 0.0f, 0.0f, "%.2f"); // Passing values kept same because j-components are always the same
+                    ImGui::Text("Initial Height (m):");        ImGui::SameLine(200); ImGui::InputDouble("##initHeight", &projectile_parameters[Parameter::Y_INITIAL].value, 0.0f, 0.0f, "%.2f");
+                    ImGui::Text("Y-Acceleration (m/s²):");     ImGui::SameLine(200); ImGui::InputDouble("##yAccel", &projectile_parameters[Parameter::ACC].value, 0.0f, 0.0f, "%.2f");
+                    ImGui::Text("Time (s):");                  ImGui::SameLine(200); ImGui::InputDouble("##time", &projectile_parameters[Parameter::TIME].value, 0.0f, 0.0f, "%.2f");
+                    ImGui::Text("Distance (m):");              ImGui::SameLine(200); ImGui::InputDouble("##distance", &projectile_parameters[Parameter::RANGE].value, 0.0f, 0.0f, "%.2f");
+                    ImGui::Text("Maximum Height (m):");        ImGui::SameLine(200); ImGui::InputDouble("##maxHeight", &projectile_parameters[Parameter::MAX_HEIGHT].value, 0.0f, 0.0f, "%.2f");
+
+                    ImGui::EndTabItem();
+                }
+
+                ImGui::EndTabBar();
+            }
+
+            // --- Layout Settings ---
+            ImGui::PushItemWidth(120.0f);
+            // --- Results Section (read-only input boxes) ---
+            ImGui::BeginDisabled();  // prevents user editing but still shows the inputs normally
+            // --- Output Fields ---
+            ImGui::Text("Time of Apex (s):"); ImGui::SameLine(200);
+            ImGui::InputDouble("##timeFlight", &projectile_parameters[Parameter::TIME_OF_APEX].value, 0.0f, 0.0f, "%.2f");
+            //--- End of Results Section ---
+            ImGui::EndDisabled();
+            ImGui::PopItemWidth();
+
+            ImGui::EndTabItem();
+        }
+
+        // Forces Tab
+        if (ImGui::BeginTabItem("Forces")) {
+            // --- Input Fields ---
+            if(table_state != ParameterTable::FORCES) {
+                clear_userInput();
+                table_state = ParameterTable::FORCES;
+            }
+
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 10.0f, 1.0f, 1.0f));
+            ImGui::Text(" !!!!!!!!!!!!!!! Coming Soon !!!!!!!!!!!!!!!");
+            ImGui::PopStyleColor();
+            ImGui::BeginDisabled();  // prevents user editing but still shows the inputs normally
+            ImGui::Text("Friction Coefficiant (Mu):");              ImGui::SameLine(200); ImGui::InputDouble("##friction", &projectile_parameters[Parameter::COEFF_FRICTION].value, 0.0f, 0.0f, "%.3f");
+            ImGui::Text("Force (N):");         ImGui::SameLine(200); ImGui::InputDouble("##initForce", &projectile_parameters[Parameter::FORCE].value, 0.0f, 0.0f, "%.2f");
+            ImGui::Text("Time (s):");                  ImGui::SameLine(200); ImGui::InputDouble("##time", &projectile_parameters[Parameter::TIME].value, 0.0f, 0.0f, "%.2f");
+            ImGui::Text("Mass (kg):");                 ImGui::SameLine(200); ImGui::InputDouble("##mass", &projectile_parameters[Parameter::MASS].value, 0.0f, 0.0f, "%.2f");
+            ImGui::EndDisabled();
+
+            ImGui::EndTabItem();
+        }
+
+        ImGui::EndTabBar();
+
+        ImGui::Dummy(ImVec2(0, 20));
+        ImGui::Text("Errors:");
+
+        ImGui::BeginChild("ErrorBox", ImVec2(0, 60), true);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 10.0f, 1.0f, 1.0f));
+        ImGui::TextWrapped("%s", user_error_message.c_str());
+        ImGui::PopStyleColor();
+        ImGui::EndChild();
+
+        if(ImGui::Button("PLAY")) {
+        cleanup_input();
+        }
+
+        ImGui::SameLine(50); if(ImGui::Button("CLEAR")) {
+            clear_userInput();
+        }
+    }
+
     // --- End of Results Tab ---
     ImGui::End();
+
 
     // Set initial position of the window
     ImGui::SetNextWindowPos(ImVec2(10.f,490.f), ImGuiCond_Once);
@@ -296,8 +680,8 @@ int main(){
     // Center the screen to the display
     auto desktop = sf::VideoMode::getDesktopMode();
     window_obj.setPosition({
-        (static_cast<int>(desktop.size.x) / 2) - (static_cast<int>(window_obj.getSize().x) / 2),
-        (static_cast<int>(desktop.size.y) / 2) - (static_cast<int>(window_obj.getSize().y) / 2)
+        (desktop.size.x / 2 - window_obj.getSize().x / 2),
+        (desktop.size.y / 2 - window_obj.getSize().y / 2)
     });
 
     // Check if the GUI is mounted
