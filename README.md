@@ -83,3 +83,4 @@ All values reset to default and error messages disappear, allowing the user to r
 5. cmake --build build
 6. Finally, you can use ./build/bin/main to run the code
 ```
+Warning: Temp bug where only A = -1 seems to work for the renderer. Fix: Soon
