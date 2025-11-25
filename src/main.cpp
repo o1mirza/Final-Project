@@ -9,7 +9,6 @@
 #include <string>
 #include <map>
 #include <algorithm>
-#include <iostream>
 
 // GLOBAL VALUES
 // Constant config values
@@ -53,15 +52,15 @@ struct ParameterInfo{
 
 // Map to store user input and values to be displayed to the user
 std::map<Parameter, ParameterInfo> projectile_parameters {
-    {Parameter::V_INITIAL_I_COMPONENT, ParameterInfo{"v_initial_i_component", 2.f, 0.f, 1, 1000, true, ParameterTable::KINEMATICS_VECTOR, {Parameter::V_INITIAL_J_COMPONENT}}},
-    {Parameter::V_INITIAL_J_COMPONENT, ParameterInfo{"v_ininitial_j_component", 2.f, 0.f, 1, 1000, true, ParameterTable::KINEMATICS_VECTOR, {Parameter::V_INITIAL_I_COMPONENT}}},
+    {Parameter::V_INITIAL_I_COMPONENT, ParameterInfo{"v_initial_i_component", 0.f, 0.f, 1, 1000, true, ParameterTable::KINEMATICS_VECTOR, {Parameter::V_INITIAL_J_COMPONENT}}},
+    {Parameter::V_INITIAL_J_COMPONENT, ParameterInfo{"v_ininitial_j_component", 0.f, 0.f, 1, 1000, true, ParameterTable::KINEMATICS_VECTOR, {Parameter::V_INITIAL_I_COMPONENT}}},
     {Parameter::V_FINAL_I_COMPONENT, ParameterInfo{"v_final_i_component", 0.f, 0.f, 1, 1000, true, ParameterTable::KINEMATICS_VECTOR, {Parameter::V_FINAL_J_COMPONENT}}},
     {Parameter::V_FINAL_J_COMPONENT, ParameterInfo{"v_final_j_component", 0.f, 0.f, 1, 1000, true, ParameterTable::KINEMATICS_VECTOR, {Parameter::V_FINAL_I_COMPONENT}}},
     {Parameter::INITIAL_SPEED, ParameterInfo{"initial_speed", 0.f, 0.f, 1, 1000, true, ParameterTable::KINEMATICS_SCALAR, {}}},
     {Parameter::FINAL_SPEED, ParameterInfo{"final_speed", 0.f, 0.f, 1, 1000, true, ParameterTable::KINEMATICS_SCALAR, {}}},
     {Parameter::Y_INITIAL, ParameterInfo{"y_initial", 0.f, 0.f, 0, 1000, false, ParameterTable::BOTH, {}}},
     {Parameter::COEFF_FRICTION, ParameterInfo{"coeff_friction", 0.f, 0.f, 1, 1, true, ParameterTable::FORCES, {Parameter::FORCE, Parameter::TIME, Parameter::MASS}}},
-    {Parameter::ACC, ParameterInfo{"acc", -2.f, 0.f, -1000, -1, true, ParameterTable::BOTH, {}}},
+    {Parameter::ACC, ParameterInfo{"acc", 0.f, 0.f, -1000, -1, true, ParameterTable::BOTH, {}}},
     {Parameter::FORCE, ParameterInfo{"force", 0.f, 0.f, 1, 1000, true, ParameterTable::FORCES, {Parameter::TIME, Parameter::MASS}}},
     {Parameter::ANGLE, ParameterInfo{"angle", 45.f, 45.f, 0, 90, false, ParameterTable::BOTH, {}}},
     {Parameter::TIME, ParameterInfo{"time", 0.f, 0.f, 1, 1000, true, ParameterTable::BOTH, {}}},
@@ -423,17 +422,18 @@ class projectile_manager {
         double t {0};
         const double radius {30};
 
-    // Normalizes coords to the bottom right of the screen
-    void normalize_coords(double &y){
-        double height = static_cast<float>(window->getSize().y);
-        y = height - y;
-    }
-
     public:
         std::vector<Vector2> pos_list;
         const double start_x{15}, start_y{30};
         double x, y;
-    
+
+        // Normalizes coords to the bottom right of the screen
+        void normalize_coords(double &y){
+            double height = static_cast<float>(window->getSize().y);
+            y = height - y;
+        }
+
+
         projectile_manager(){
             this-> x = this->start_x;
             this->y = start_y;
@@ -468,13 +468,11 @@ class projectile_manager {
         this->x += del_x; this->y += del_y; 
 
         double height = static_cast<float>(window->getSize().y);
-        if (height - this->y < 0){
-            std::cout << "end" << std::endl;
+        if (height - this->y < 0){;
             stop_time = true;
             this->y = this->start_y;
             normalize_coords(this->y);
         }
-        std::cout << del_x << " " << del_y << " " << this->y << std::endl;
 
         dynamic_object_handler.move(this->object_ptr, Vector2(del_x, del_y));
         this->pos_list.push_back(Vector2(this->x, this->y));// So we can let the user more back and forwards in the frame
@@ -508,9 +506,10 @@ void clear_userInput(projectile_manager &main_projectile) {
 
     user_error_message = ""; // Clear error message string
     is_solved = false;
-    stop_time = false;
+    stop_time = true;
     main_projectile.x = main_projectile.start_x;
     main_projectile.y = main_projectile.start_y;
+    main_projectile.normalize_coords(main_projectile.y);
     main_projectile.pos_list.clear();
 }
 
@@ -723,7 +722,7 @@ void window_processing(projectile_manager &main_projectile){
     // Set the user view as the camera
     window->clear(sf::Color::Black);
     follow_projectile = is_projectile_off_screen(main_projectile);
-    if (false){//follow_projectile
+    if (false){// to do, follow projectile when it leaves the bounds of the camera
         double height = static_cast<float>(window->getSize().y);
         camera.setCenter({main_projectile.x, height - main_projectile.y});
     }
