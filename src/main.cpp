@@ -411,6 +411,10 @@ class dynamic_object_manager: public static_object_manager{
             obj->move({d_pos.x, d_pos.y});
         }
 
+        void set(const shape_ptr &obj, const Vector2 &d_pos){
+            obj->setPosition({d_pos.x, d_pos.y});
+        }
+
 };
 // Initialize the dynamic object handler
 dynamic_object_manager dynamic_object_handler {};
@@ -477,6 +481,11 @@ class projectile_manager {
         dynamic_object_handler.move(this->object_ptr, Vector2(del_x, del_y));
         this->pos_list.push_back(Vector2(this->x, this->y));// So we can let the user more back and forwards in the frame
     }
+    void update_projectile(){
+        dynamic_object_handler.set(this->object_ptr, Vector2(this->x, this->y));
+        }
+
+
 };
 
 // Dotted line handler
@@ -510,6 +519,7 @@ void clear_userInput(projectile_manager &main_projectile) {
     main_projectile.x = main_projectile.start_x;
     main_projectile.y = main_projectile.start_y;
     main_projectile.normalize_coords(main_projectile.y);
+    main_projectile.update_projectile();
     main_projectile.pos_list.clear();
 }
 
