@@ -1,4 +1,4 @@
-# Final-Project
+# MTE301 Final-Project
 
 1. Open the simulator
 The interface loads showing the Input Tab. You can choose between Scalar, Vector, or Forces modes.
